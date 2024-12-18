@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include <mysqlx/xdevapi.h> // MySQLX 헤더 파일
 #include "MySQLComponent.generated.h"
 
 
@@ -24,5 +25,21 @@ public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+public:
+	// 데이터베이스 연결
+	UFUNCTION(BlueprintCallable, Category = "Database")
+	bool ConnectToDatabase(const FString& Host, int32 Port, const FString& Username, const FString& Password, const FString& Schema);
+
+	// 데이터 삽입
+	UFUNCTION(BlueprintCallable, Category = "Database")
+	bool InsertIntoDatabase(const FString& TableName, const FString& Name, const FString& Password);
+
+	// 세션 종료
+	UFUNCTION(BlueprintCallable, Category = "Database")
+	void CloseDatabaseConnection();
 		
+
+private:
+	// MySQLX Session
+	mysqlx::Session* Session;
 };
