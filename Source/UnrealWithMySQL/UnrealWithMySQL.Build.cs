@@ -38,13 +38,5 @@ public class UnrealWithMySQL : ModuleRules
         RuntimeDependencies.Add("$(BinaryOutputDir)/mysqlcppconn8-2-vs14.dll", Path.Combine(MySQL_Directory, "lib64/mysqlcppconn8-2-vs14.dll"));
         RuntimeDependencies.Add("$(BinaryOutputDir)/libssl-3-x64.dll", Path.Combine(MySQL_Directory, "lib64/libssl-3-x64.dll"));
         RuntimeDependencies.Add("$(BinaryOutputDir)/libcrypto-3-x64.dll", Path.Combine(MySQL_Directory, "lib64/libcrypto-3-x64.dll"));
-
-        // Uncomment if you are using Slate UI
-        // PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
-
-        // Uncomment if you are using online features
-        // PrivateDependencyModuleNames.Add("OnlineSubsystem");
-
-        // To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
     }
 }
