@@ -44,7 +44,7 @@ public:
 
 	// 데이터 삽입
 	UFUNCTION(BlueprintCallable, Category = "Database")
-	bool InsertIntoDatabase(const FString& schema, const FString& tablename, const FString& username, const FString& password);
+	bool InsertIntoDatabase(const FString& tablename, const FString& username, const FString& password);
 
 	// 세션 종료
 	UFUNCTION(BlueprintCallable, Category = "Database")
@@ -53,5 +53,6 @@ public:
 
 private:
 	// MySQLX Session
-	mysqlx::Session* Session;
+	mysqlx::Session* m_Session;
+	mysqlx::Schema* m_SchemaDB;
 };

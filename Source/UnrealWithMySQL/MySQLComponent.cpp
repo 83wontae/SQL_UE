@@ -49,7 +49,7 @@ void UMySQLComponent::ConnectToDatabaseAsync(const FString& Host, int32 Port, co
 
         try {
             // MySQL 세션 생성
-            Session = new mysqlx::Session(HostStr, Port, UsernameStr, PasswordStr);
+            m_Session = new mysqlx::Session(HostStr, Port, UsernameStr, PasswordStr);
 
             // 스키마 설정
             // Session->sql("USE " + std::string(TCHAR_TO_UTF8(*Schema))).execute();
@@ -96,10 +96,11 @@ bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const F
 
     try {
         // MySQLX 세션 생성
-        Session = new mysqlx::Session(HostStr, port, UsernameStr, PasswordStr);
-        UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database: %s"), *schema);
+        m_Session = new mysqlx::Session(HostStr, port, UsernameStr, PasswordStr);
 
+        m_SchemaDB = new mysqlx::Schema(m_Session->getSchema(TCHAR_TO_UTF8(*schema)));
         // DefaultSchema 설정
+        // UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database: %s"), *schema);
         // Session->sql("USE " + std::string(TCHAR_TO_UTF8(*schema))).execute();
         return true;
     }
@@ -117,9 +118,9 @@ bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const F
     }
 }
 
-bool UMySQLComponent::InsertIntoDatabase(const FString& schema, const FString& tablename, const FString& username, const FString& password)
+bool UMySQLComponent::InsertIntoDatabase(const FString& tablename, const FString& username, const FString& password)
 {
-    if (!Session)
+    if (!m_Session)
     {
         UE_LOG(LogTemp, Error, TEXT("No database session available. Connect to the database first."));
         return false;
@@ -128,15 +129,15 @@ bool UMySQLComponent::InsertIntoDatabase(const FString& schema, const FString& t
     try
     {
         // 스키마와 테이블 접근
-        //mysqlx::Schema Schema = Session->getDefaultSchema();
-        UE_LOG(LogTemp, Log, TEXT("Get Database Schema: %s"), *schema);
-        mysqlx::Schema SchemaDB = Session->getSchema(TCHAR_TO_UTF8(*schema));
+        // UE_LOG(LogTemp, Log, TEXT("Get Database Schema: %s"), *schema);
+        // mysqlx::Schema SchemaDB = m_Session->getDefaultSchema();
+        // mysqlx::Schema SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*schema));
         UE_LOG(LogTemp, Log, TEXT("Get Tablename: %s"), *tablename);
-        mysqlx::Table Table = SchemaDB.getTable(TCHAR_TO_UTF8(*tablename));
+        mysqlx::Table Table = m_SchemaDB->getTable(TCHAR_TO_UTF8(*tablename));
 
         // 데이터 삽입
         Table.insert("username", "password").values(TCHAR_TO_UTF8(*username), TCHAR_TO_UTF8(*password)).execute();
-        UE_LOG(LogTemp, Log, TEXT("Data inserted successfully: Username = %s, Password = %d"), *username, *password);
+        UE_LOG(LogTemp, Log, TEXT("Data inserted successfully: Username = %s, Password = %s"), *username, *password);
 
         return true;
     }
@@ -154,10 +155,10 @@ bool UMySQLComponent::InsertIntoDatabase(const FString& schema, const FString& t
 
 void UMySQLComponent::CloseDatabaseConnection()
 {
-    if (Session)
+    if (m_Session)
     {
-        delete Session;
-        Session = nullptr;
+        delete m_Session;
+        m_Session = nullptr;
         UE_LOG(LogTemp, Log, TEXT("Database session closed."));
     }
 }
