@@ -5,7 +5,7 @@
 #include <xdevapi.h> // MySQLX 헤더 파일
 
 // Sets default values for this component's properties
-UMySQLComponent::UMySQLComponent()
+UMySQLComponent::UMySQLComponent():m_Session(nullptr), m_SchemaDB(std::nullopt)
 {
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
@@ -16,7 +16,6 @@ UMySQLComponent::UMySQLComponent()
 
 UMySQLComponent::~UMySQLComponent()
 {
-    CloseDatabaseConnection();
 }
 
 
@@ -29,6 +28,37 @@ void UMySQLComponent::BeginPlay()
 	
 }
 
+void UMySQLComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    UE_LOG(LogTemp, Log, TEXT("EndPlay MySQLComponent..."));
+
+    {
+        FScopeLock Lock(&SessionCriticalSection);
+
+        if (m_Session)
+        {
+            try
+            {
+                UE_LOG(LogTemp, Log, TEXT("Closing MySQL session..."));
+                m_Session->close(); // 세션 종료
+                m_Session.reset(); // 세션 해제
+                UE_LOG(LogTemp, Log, TEXT("MySQL session closed successfully."));
+            }
+            catch (const mysqlx::Error& Err)
+            {
+                UE_LOG(LogTemp, Error, TEXT("Error while closing session: %s"), *FString(Err.what()));
+            }
+        }
+    }
+
+    // 모든 타이머 정리
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearAllTimersForObject(this);
+    }
+
+    Super::EndPlay(EndPlayReason);
+}
 
 // Called every frame
 void UMySQLComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -40,6 +70,17 @@ void UMySQLComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActor
 
 void UMySQLComponent::ConnectToDatabaseAsync(const FString& Host, int32 Port, const FString& Username, const FString& Password, const FString& Schema)
 {
+    {
+        FScopeLock Lock(&SessionCriticalSection);
+
+        // 기존 세션이 존재하고, 유효하면 그대로 사용
+        if (IsSessionValid())
+        {
+            UE_LOG(LogTemp, Log, TEXT("Using existing MySQL session."));
+            return;
+        }
+    }
+
     // 비동기로 MySQL 연결 작업 실행
     Async(EAsyncExecution::Thread, [this, Host, Port, Username, Password, Schema]()
     {
@@ -47,43 +88,51 @@ void UMySQLComponent::ConnectToDatabaseAsync(const FString& Host, int32 Port, co
         std::string UsernameStr = TCHAR_TO_UTF8(*Username);
         std::string PasswordStr = TCHAR_TO_UTF8(*Password);
 
-        try {
-            // MySQL 세션 생성
-            m_Session = new mysqlx::Session(HostStr, Port, UsernameStr, PasswordStr);
+        try 
+        {
+            {
+                FScopeLock Lock(&SessionCriticalSection);
 
-            // 스키마 설정
-            // Session->sql("USE " + std::string(TCHAR_TO_UTF8(*Schema))).execute();
+                // MySQL 세션 생성
+                m_Session = std::make_unique<mysqlx::Session>(HostStr, Port, UsernameStr, PasswordStr);
+            }
+
+            // 스키마를 기본값으로 설정
+            m_SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*Schema));
 
             // 연결 성공 시 메인 쓰레드에서 성공 이벤트 호출
             Async(EAsyncExecution::TaskGraphMainThread, [this, Schema]()
-                {
-                    OnConnectionResult.Broadcast(true, FString::Printf(TEXT("Connected to MySQL database and schema: %s"), *Schema));
-                    UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database and schema: %s"), *Schema);
-                });
+            {
+                OnConnectionResult.Broadcast(true, FString::Printf(TEXT("Connected to MySQL database and schema: %s"), *Schema));
+                UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database and schema: %s"), *Schema);
+            });
         }
-        catch (const mysqlx::Error& Err) {
+        catch (const mysqlx::Error& Err) 
+        {
             // 연결 실패 시 메인 쓰레드에서 실패 이벤트 호출
             Async(EAsyncExecution::TaskGraphMainThread, [this, Err]()
-                {
-                    OnConnectionResult.Broadcast(false, FString::Printf(TEXT("MySQL Error: %s"), *FString(Err.what())));
-                    UE_LOG(LogTemp, Error, TEXT("MySQL Error: %s"), *FString(Err.what()));
-                });
+            {
+                OnConnectionResult.Broadcast(false, FString::Printf(TEXT("MySQL Error: %s"), *FString(Err.what())));
+                UE_LOG(LogTemp, Error, TEXT("MySQL Error: %s"), *FString(Err.what()));
+            });
         }
-        catch (const std::exception& Ex) {
+        catch (const std::exception& Ex) 
+        {
             // 일반 예외 발생 시
             Async(EAsyncExecution::TaskGraphMainThread, [this, Ex]()
-                {
-                    OnConnectionResult.Broadcast(false, FString::Printf(TEXT("Standard Exception: %s"), *FString(Ex.what())));
-                    UE_LOG(LogTemp, Error, TEXT("Standard Exception: %s"), *FString(Ex.what()));
-                });
+            {
+                OnConnectionResult.Broadcast(false, FString::Printf(TEXT("Standard Exception: %s"), *FString(Ex.what())));
+                UE_LOG(LogTemp, Error, TEXT("Standard Exception: %s"), *FString(Ex.what()));
+            });
         }
-        catch (...) {
+        catch (...) 
+        {
             // 알 수 없는 예외 처리
             Async(EAsyncExecution::TaskGraphMainThread, [this]()
-                {
-                    OnConnectionResult.Broadcast(false, TEXT("Unknown error occurred while connecting to MySQL."));
-                    UE_LOG(LogTemp, Error, TEXT("Unknown error occurred while connecting to MySQL."));
-                });
+            {
+                OnConnectionResult.Broadcast(false, TEXT("Unknown error occurred while connecting to MySQL."));
+                UE_LOG(LogTemp, Error, TEXT("Unknown error occurred while connecting to MySQL."));
+            });
         }
     });
 }
@@ -95,24 +144,36 @@ bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const F
     std::string PasswordStr = TCHAR_TO_UTF8(*password);
 
     try {
-        // MySQLX 세션 생성
-        m_Session = new mysqlx::Session(HostStr, port, UsernameStr, PasswordStr);
+        {
+            FScopeLock Lock(&SessionCriticalSection);
 
-        m_SchemaDB = new mysqlx::Schema(m_Session->getSchema(TCHAR_TO_UTF8(*schema)));
-        // DefaultSchema 설정
-        // UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database: %s"), *schema);
-        // Session->sql("USE " + std::string(TCHAR_TO_UTF8(*schema))).execute();
+            // MySQL 세션 생성
+            m_Session = std::make_unique<mysqlx::Session>(HostStr, port, UsernameStr, PasswordStr);
+        }
+
+        // 스키마를 기본값으로 설정
+        m_SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*schema));
+
+        OnConnectionResult.Broadcast(true, FString::Printf(TEXT("Connected to MySQL database and schema: %s"), *schema));
+        UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database and schema: %s"), *schema);
+
         return true;
     }
     catch (const mysqlx::Error& err) {
+
+        OnConnectionResult.Broadcast(false, FString::Printf(TEXT("MySQL Error: %s"), *FString(err.what())));
         UE_LOG(LogTemp, Error, TEXT("MySQL Error: %s"), *FString(err.what()));
         return false;
     }
     catch (std::exception& ex) {
+
+        OnConnectionResult.Broadcast(false, FString::Printf(TEXT("Standard Exception: %s"), *FString(ex.what())));
         UE_LOG(LogTemp, Error, TEXT("Standard Exception: %s"), *FString(ex.what()));
         return false;
     }
     catch (...) {
+
+        OnConnectionResult.Broadcast(false, TEXT("Unknown error occurred while connecting to MySQL."));
         UE_LOG(LogTemp, Error, TEXT("Unknown exception occurred while connecting to MySQL."));
         return false;
     }
@@ -153,12 +214,96 @@ bool UMySQLComponent::InsertIntoDatabase(const FString& tablename, const FString
     }
 }
 
-void UMySQLComponent::CloseDatabaseConnection()
+bool UMySQLComponent::SelectIntoDatabase(const FString& tablename, const FString& username, const FString& password)
 {
-    if (m_Session)
+    if (IsSessionValid())
     {
-        delete m_Session;
-        m_Session = nullptr;
-        UE_LOG(LogTemp, Log, TEXT("Database session closed."));
+        UE_LOG(LogTemp, Error, TEXT("Database schema is not initialized."));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Username: %s, Password: %s"), *username, *password);
+
+    if (tablename.IsEmpty() || username.IsEmpty() || password.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Tablename or Username or password is empty!"));
+        return false;
+    }
+
+    try
+    {
+        // 테이블 객체 가져오기
+        mysqlx::Table Table = m_SchemaDB->getTable(TCHAR_TO_UTF8(*tablename));
+
+        if (!Table.existsInDatabase())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Table does not exist in database: %s"), *tablename);
+            return false;
+        }
+
+        // SELECT 쿼리 실행: username과 password가 일치하는 레코드 조회
+        // SQL 쿼리 : SELECT username, password FROM users WHERE username = 'username' AND password = 'password';
+        mysqlx::RowResult Result = Table.select("username", "password")
+            .where("username = :uname AND password = :pwd")
+            .bind("uname", TCHAR_TO_UTF8(*username))
+            .bind("pwd", TCHAR_TO_UTF8(*password))
+            .execute();
+
+        
+        // 결과 확인
+        if (Result.count() == 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Invalid credentials for user: %s"), *username);
+            return false; // 데이터가 없으면 false 반환
+        }
+
+        mysqlx::Row RowData = Result.fetchOne();// Row 한줄 Read
+
+        // RowData 수동으로 초기화 (필수는 아님)
+        RowData = mysqlx::Row();  // 명시적으로 초기화
+
+        UE_LOG(LogTemp, Log, TEXT("User credentials are valid: %s"), *username);
+        return true; // 데이터가 존재하면 true 반환
+    }
+    catch (const mysqlx::Error& err)
+    {
+        UE_LOG(LogTemp, Error, TEXT("MySQL Error: %s"), *FString(err.what()));
+        return false;
+    }
+    catch (std::exception& ex)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Standard Exception: %s"), *FString(ex.what()));
+        return false;
+    }
+    catch (...)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Unknown error occurred while validating credentials."));
+        return false;
+    }
+}
+
+bool UMySQLComponent::IsSessionValid()
+{
+    if (!m_Session)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Session is null."));
+        return false;
+    }
+
+    try
+    {
+        mysqlx::SqlStatement Result = m_Session->sql("SELECT 1");
+        Result.execute();
+        return true; // 쿼리 실행 성공 = 세션이 유효함
+    }
+    catch (const mysqlx::Error& Err)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Session validation failed: %s"), *FString(Err.what()));
+        return false;
+    }
+    catch (...)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Unknown error during session validation."));
+        return false;
     }
 }

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include <mysqlx/xdevapi.h> // MySQLX 헤더 파일
+#include "HAL/CriticalSection.h"
 #include "MySQLComponent.generated.h"
 
 // 블루프린트에 연결 성공 여부와 메시지를 반환하기 위한 Delegate
@@ -23,6 +24,8 @@ public:
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:	
 	// Called every frame
@@ -46,13 +49,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Database")
 	bool InsertIntoDatabase(const FString& tablename, const FString& username, const FString& password);
 
-	// 세션 종료
+	// Select 데이터 검증(username, password를 전달하면 테이블 안에 데이터를 확인하여 존재하면 True, 존재하지 않으면 False 반환)
 	UFUNCTION(BlueprintCallable, Category = "Database")
-	void CloseDatabaseConnection();
-		
+	bool SelectIntoDatabase(const FString& tablename, const FString& username, const FString& password);
+
+	UFUNCTION(BlueprintCallable, Category = "Database")
+	bool IsSessionValid();
 
 private:
+	FCriticalSection SessionCriticalSection;
+
 	// MySQLX Session
-	mysqlx::Session* m_Session;
-	mysqlx::Schema* m_SchemaDB;
+	std::unique_ptr<mysqlx::Session> m_Session;
+
+
+	// std::optional<T>는 C++17에서 추가된 값이 없을 수도 있는 변수를 안전하게 관리하는 컨테이너입니다.
+	// 즉, 값이 있을 수도 있고 없을 수도 있는 상황에서 nullptr이나 예외 처리를 쓰지 않고 더 안전한 방법을 제공합니다.
+	std::optional<mysqlx::Schema> m_SchemaDB; // optional로 관리하여 안전성 증가
 };
