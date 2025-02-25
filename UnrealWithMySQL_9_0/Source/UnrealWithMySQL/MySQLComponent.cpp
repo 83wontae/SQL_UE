@@ -14,11 +14,6 @@ UMySQLComponent::UMySQLComponent():m_Session(nullptr), m_SchemaDB(std::nullopt)
 	// ...
 }
 
-UMySQLComponent::~UMySQLComponent()
-{
-}
-
-
 // Called when the game starts
 void UMySQLComponent::BeginPlay()
 {
@@ -40,8 +35,8 @@ void UMySQLComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
             try
             {
                 UE_LOG(LogTemp, Log, TEXT("Closing MySQL session..."));
-                m_Session->close(); // 세션 종료
-                m_Session.reset(); // 세션 해제
+                m_Session->close(); // MySQL 세션 종료
+                m_Session.Reset(); // TUniquePtr 해제
                 UE_LOG(LogTemp, Log, TEXT("MySQL session closed successfully."));
             }
             catch (const mysqlx::Error& Err)
@@ -68,75 +63,6 @@ void UMySQLComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActor
 	// ...
 }
 
-void UMySQLComponent::ConnectToDatabaseAsync(const FString& Host, int32 Port, const FString& Username, const FString& Password, const FString& Schema)
-{
-    {
-        FScopeLock Lock(&SessionCriticalSection);
-
-        // 기존 세션이 존재하고, 유효하면 그대로 사용
-        if (IsSessionValid())
-        {
-            UE_LOG(LogTemp, Log, TEXT("Using existing MySQL session."));
-            return;
-        }
-    }
-
-    // 비동기로 MySQL 연결 작업 실행
-    Async(EAsyncExecution::Thread, [this, Host, Port, Username, Password, Schema]()
-    {
-        std::string HostStr = TCHAR_TO_UTF8(*Host);
-        std::string UsernameStr = TCHAR_TO_UTF8(*Username);
-        std::string PasswordStr = TCHAR_TO_UTF8(*Password);
-
-        try 
-        {
-            {
-                FScopeLock Lock(&SessionCriticalSection);
-
-                // MySQL 세션 생성
-                m_Session = std::make_unique<mysqlx::Session>(HostStr, Port, UsernameStr, PasswordStr);
-            }
-
-            // 스키마를 기본값으로 설정
-            m_SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*Schema));
-
-            // 연결 성공 시 메인 쓰레드에서 성공 이벤트 호출
-            Async(EAsyncExecution::TaskGraphMainThread, [this, Schema]()
-            {
-                OnConnectionResult.Broadcast(true, FString::Printf(TEXT("Connected to MySQL database and schema: %s"), *Schema));
-                UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database and schema: %s"), *Schema);
-            });
-        }
-        catch (const mysqlx::Error& Err) 
-        {
-            // 연결 실패 시 메인 쓰레드에서 실패 이벤트 호출
-            Async(EAsyncExecution::TaskGraphMainThread, [this, Err]()
-            {
-                OnConnectionResult.Broadcast(false, FString::Printf(TEXT("MySQL Error: %s"), *FString(Err.what())));
-                UE_LOG(LogTemp, Error, TEXT("MySQL Error: %s"), *FString(Err.what()));
-            });
-        }
-        catch (const std::exception& Ex) 
-        {
-            // 일반 예외 발생 시
-            Async(EAsyncExecution::TaskGraphMainThread, [this, Ex]()
-            {
-                OnConnectionResult.Broadcast(false, FString::Printf(TEXT("Standard Exception: %s"), *FString(Ex.what())));
-                UE_LOG(LogTemp, Error, TEXT("Standard Exception: %s"), *FString(Ex.what()));
-            });
-        }
-        catch (...) 
-        {
-            // 알 수 없는 예외 처리
-            Async(EAsyncExecution::TaskGraphMainThread, [this]()
-            {
-                OnConnectionResult.Broadcast(false, TEXT("Unknown error occurred while connecting to MySQL."));
-                UE_LOG(LogTemp, Error, TEXT("Unknown error occurred while connecting to MySQL."));
-            });
-        }
-    });
-}
-
 bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const FString& username, const FString& password, const FString& schema)
 {
     std::string HostStr = TCHAR_TO_UTF8(*host);
@@ -148,7 +74,7 @@ bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const F
             FScopeLock Lock(&SessionCriticalSection);
 
             // MySQL 세션 생성
-            m_Session = std::make_unique<mysqlx::Session>(HostStr, port, UsernameStr, PasswordStr);
+            m_Session = MakeUnique<mysqlx::Session>(HostStr, port, UsernameStr, PasswordStr);
         }
 
         // 스키마를 기본값으로 설정

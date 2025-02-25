@@ -19,7 +19,6 @@ class UNREALWITHMYSQL_API UMySQLComponent : public UActorComponent
 public:	
 	// Sets default values for this component's properties
 	UMySQLComponent();
-	~UMySQLComponent();
 
 protected:
 	// Called when the game starts
@@ -30,15 +29,6 @@ protected:
 public:	
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-public:
-	// 블루프린트에서 호출 가능한 MySQL 연결 함수
-	UFUNCTION(BlueprintCallable, Category = "MySQL")
-	void ConnectToDatabaseAsync(const FString& Host, int32 Port, const FString& Username, const FString& Password, const FString& Schema);
-
-	// 연결 결과 이벤트 (블루프린트에서 바인딩 가능)
-	UPROPERTY(BlueprintAssignable, Category = "MySQL")
-	FOnMySQLConnectionResult OnConnectionResult;
 
 public:
 	// 데이터베이스 연결
@@ -60,10 +50,14 @@ private:
 	FCriticalSection SessionCriticalSection;
 
 	// MySQLX Session
-	std::unique_ptr<mysqlx::Session> m_Session;
+	TUniquePtr<mysqlx::Session> m_Session;
 
 
 	// std::optional<T>는 C++17에서 추가된 값이 없을 수도 있는 변수를 안전하게 관리하는 컨테이너입니다.
 	// 즉, 값이 있을 수도 있고 없을 수도 있는 상황에서 nullptr이나 예외 처리를 쓰지 않고 더 안전한 방법을 제공합니다.
 	std::optional<mysqlx::Schema> m_SchemaDB; // optional로 관리하여 안전성 증가
+
+	// 연결 결과 이벤트 (블루프린트에서 바인딩 가능)
+	UPROPERTY(BlueprintAssignable, Category = "MySQL")
+	FOnMySQLConnectionResult OnConnectionResult;
 };
