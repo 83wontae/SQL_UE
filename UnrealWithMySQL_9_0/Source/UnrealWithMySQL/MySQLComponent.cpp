@@ -5,12 +5,11 @@
 #include <xdevapi.h> // MySQLX 헤더 파일
 
 // Sets default values for this component's properties
-UMySQLComponent::UMySQLComponent():m_Session(nullptr), m_SchemaDB(std::nullopt)
+UMySQLComponent::UMySQLComponent() :m_Session(nullptr), m_SchemaName(TEXT(""))
 {
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
-
 	// ...
 }
 
@@ -36,7 +35,9 @@ void UMySQLComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
             {
                 UE_LOG(LogTemp, Log, TEXT("Closing MySQL session..."));
                 m_Session->close(); // MySQL 세션 종료
-                m_Session.Reset(); // TUniquePtr 해제
+				m_Session.Reset(); // TUniquePtr 해제
+                //m_Session.release(); // std::make_unique 해제
+                //m_Session = nullptr;
                 UE_LOG(LogTemp, Log, TEXT("MySQL session closed successfully."));
             }
             catch (const mysqlx::Error& Err)
@@ -75,10 +76,12 @@ bool UMySQLComponent::ConnectToDatabase(const FString& host, int32 port, const F
 
             // MySQL 세션 생성
             m_Session = MakeUnique<mysqlx::Session>(HostStr, port, UsernameStr, PasswordStr);
+            // m_Session = std::make_unique<mysqlx::Session>(HostStr, port, UsernameStr, PasswordStr);
         }
 
         // 스키마를 기본값으로 설정
-        m_SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*schema));
+		m_SchemaName = schema;
+        // mysqlx::Schema SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*schema));
 
         OnConnectionResult.Broadcast(true, FString::Printf(TEXT("Connected to MySQL database and schema: %s"), *schema));
         UE_LOG(LogTemp, Log, TEXT("Connected to MySQL database and schema: %s"), *schema);
@@ -120,7 +123,8 @@ bool UMySQLComponent::InsertIntoDatabase(const FString& tablename, const FString
         // mysqlx::Schema SchemaDB = m_Session->getDefaultSchema();
         // mysqlx::Schema SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*schema));
         UE_LOG(LogTemp, Log, TEXT("Get Tablename: %s"), *tablename);
-        mysqlx::Table Table = m_SchemaDB->getTable(TCHAR_TO_UTF8(*tablename));
+        mysqlx::Schema SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*m_SchemaName));
+        mysqlx::Table Table = SchemaDB.getTable(TCHAR_TO_UTF8(*tablename));
 
         // 데이터 삽입
         Table.insert("username", "password").values(TCHAR_TO_UTF8(*username), TCHAR_TO_UTF8(*password)).execute();
@@ -159,7 +163,8 @@ bool UMySQLComponent::SelectIntoDatabase(const FString& tablename, const FString
     try
     {
         // 테이블 객체 가져오기
-        mysqlx::Table Table = m_SchemaDB->getTable(TCHAR_TO_UTF8(*tablename));
+        mysqlx::Schema SchemaDB = m_Session->getSchema(TCHAR_TO_UTF8(*m_SchemaName));
+        mysqlx::Table Table = SchemaDB.getTable(TCHAR_TO_UTF8(*tablename));
 
         if (!Table.existsInDatabase())
         {
